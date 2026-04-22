@@ -1,6 +1,7 @@
-using System.Reflection.Metadata.Ecma335;
+using System.Linq;
 using Battleship.Enum;
 using Battleship.Interfaces;
+
 namespace Battleship.Models;
 
 public class GameController : IGameController
@@ -9,124 +10,128 @@ public class GameController : IGameController
     private Player? _winner;
     private GameStatus _status;
 
-    private readonly Dictionary<Player, IBoard> _playerBoards;
-    private readonly Dictionary<Player, List<IShip>> _playerShips;
+    private Dictionary<Player, IBoard> _playerBoards;
+    private Dictionary<Player, List<IShip>> _playerShips;
 
     public event Action<IPlayer>? OnTurnChanged;
     public event Action<ICell>? OnMoveProcessed;
     public event Action<IShip>? OnShipSunk;
     public event Action<IPlayer>? OnGameOver;
 
-
-    // Constructor of the game
     public GameController(Player p1, Player p2)
     {
+        _currentPlayer = p1;
+        _status = GameStatus.Setup;
+
         _playerBoards = new Dictionary<Player, IBoard>
         {
-            {p1, new Board(10) },
-            {p2, new Board(10) }
+            { p1, new Board(10) },
+            { p2, new Board(10) }
         };
         _playerShips = new Dictionary<Player, List<IShip>>
         {
-           { p1, new List<IShip>() },
-           { p2, new List<IShip>() }
+            { p1, new List<IShip>() },
+            { p2, new List<IShip>() }
         };
-
-        _currentPlayer = p1;
-        _status = GameStatus.Setup;
     }
 
-    // Ini nanti dipanggil setelah ship diletakkan semua, dan start game
     public void StartGame()
     {
-        if (_status != GameStatus.Setup)
-            return;
-        
+        if (_status != GameStatus.Setup) return;
         _status = GameStatus.InProgress;
-
         OnTurnChanged?.Invoke(_currentPlayer);
     }
 
-    // Handle attack logic nya
     public bool PlaceShip(IPlayer player, ShipType shipType, Position position, Orientation orientation)
+{
+    if (_status != GameStatus.Setup) return false;
+
+    var p = (Player)player;
+    if (!ValidatePlacement(p, shipType, position, orientation)) return false;
+
+    var board = (Board)_playerBoards[p];
+    int size = GetShipSize(shipType);
+
+    var ship = new Ship(shipType, position, orientation);
+
+    for (int i = 0; i < size; i++)
     {
-        /* Flow logic:
-        Ambil board player, validasi posisi dalam board, validasi placement, buat ship sesuai type, letakkan ke cell board
-        simpan ship ke player dan return true */
+        int x = orientation == Orientation.Horizontal ? position.X + i : position.X;
+        int y = orientation == Orientation.Vertical ? position.Y + i : position.Y;
 
-       if (_status != GameStatus.Setup)
-          return false;
-        
-        var play = (Player)player;
-
-        var board = _playerBoards[(Player)player];
-
-        if (!IsInsideBoard(position))
-            return false;
-
-        if (!ValidatePlacement((Player)player, shipType, position, orientation))
-            return false;
-        
-        return true;
+        var cell = (Cell)board.GetCell(new Position(x, y));
+        cell.Ship = ship; 
     }
-    //handle attack logic nya tu disini akan memanggil 
+
+    _playerShips[p].Add(ship);
+    return true;
+}
+
     public bool MakeMove(Position position)
     {
+        if (_status != GameStatus.InProgress) return false;
+        if (!ValidateAttack(position)) return false;
+
+        var opponent = (Player)GetOpponent();
+        var board = (Board)_playerBoards[opponent];
+        var cell = (Cell)board.GetCell(position);
+
+        bool isHit = (cell.State == CellState.Occupied);
+        cell.State = isHit ? CellState.Hit : CellState.Miss;
+
+        // Update status kapal jika terkena
+        if (isHit)
+{
+        cell.State = CellState.Hit;
+
+        var ship = (Ship)cell.Ship!;
+        ship.Hits++;
+
+        UpdateShipStatus(ship);
+    }
+        OnMoveProcessed?.Invoke(cell);
+
+        // Chain Hit: Pindah giliran HANYA jika meleset
+        if (!CheckWinner() && !isHit)
+        {
+            SwitchTurn();
+        }
+
         return true;
     }
-    //End game and trigger gameover event nya
-    public void EndGame(){}
-    //return current game status
-    public GameStatus GetStatus()=>_status;
-    // return current player (sekarang giliran siapa)
-    public IPlayer? GetWinner()=>_winner;
-    // returns current player (whose turn it is)
+
+    public void EndGame() => _status = GameStatus.End;
+    public GameStatus GetStatus() => _status;
+    public IPlayer? GetWinner() => _winner;
     public IPlayer GetCurrentPlayer() => _currentPlayer;
-    // returns opponent player
-    public IPlayer GetOpponent() 
+    public IPlayer GetOpponent()
     {
-        // Ambil semua pemain dari dictionary
-        var players = _playerBoards.Keys.ToList();
-        
-        // Kembalikan pemain yang bukan _currentPlayer
-        return _currentPlayer == players[0] ? players[1] : players[0];
+        return _playerBoards.Keys.First(p => p != _currentPlayer);
     }
-    // returns board of selected player
     public IBoard GetBoard(IPlayer p) => _playerBoards[(Player)p];
-    // returns all ships of selected player
     public List<IShip> GetShips(IPlayer p) => _playerShips[(Player)p];
 
-    // Tempatkan ini di bagian paling bawah class GameController
-    private int GetShipSize(ShipType shipType)
+    private int GetShipSize(ShipType shipType) => shipType switch
     {
-        return shipType switch
-        {
-            ShipType.Carrier => 5,
-            ShipType.Battleship => 4,
-            ShipType.Cruiser => 3,
-            ShipType.Destroyer => 3,
-            ShipType.PatrolBoat => 2,
-            _ => 0
-        };
-    }
+        ShipType.Carrier => 5,
+        ShipType.Battleship => 4,
+        ShipType.Cruiser => 3,
+        ShipType.Destroyer => 3,
+        ShipType.PatrolBoat => 2,
+        _ => 0
+    };
 
-    // checks if position is inside board boundaries
     private bool IsInsideBoard(Position position)
     {
-        // Ambil board dari dictionary untuk tau ukurannya
-        // (Asumsinya semua pemain punya ukuran board yang sama)
-        var board = _playerBoards.Values.First(); 
-        
-        return position.X >= 0 && position.X < board.Size && 
-            position.Y >= 0 && position.Y < board.Size;
+        int size = _playerBoards.Values.First().Size;
+        return position.X >= 0 && position.X < size && position.Y >= 0 && position.Y < size;
     }
-    // checks if a cell is already occupied by a ship
+
     private bool IsCellOccupied(Board board, Position position)
     {
-        var cell = (Cell)board.GetCell(position);
-        return cell.State == CellState.Occupied;
+        return board.GetCell(position).State == CellState.Occupied;
     }
-    // validates if ship placement is legal
+
     private bool ValidatePlacement(Player player, ShipType shipType, Position position, Orientation orientation)
     {
         int size = GetShipSize(shipType);
@@ -136,66 +141,44 @@ public class GameController : IGameController
         {
             int x = orientation == Orientation.Horizontal ? position.X + i : position.X;
             int y = orientation == Orientation.Vertical ? position.Y + i : position.Y;
-            Position checkPos = new Position(x, y);
+            var pos = new Position(x, y);
 
-            if (!IsInsideBoard(checkPos) || IsCellOccupied(board, checkPos))
-                return false;
+            if (!IsInsideBoard(pos) || IsCellOccupied(board, pos)) return false;
         }
         return true;
     }
-    // validates if attack position is valid
+
     private bool ValidateAttack(Position pos)
     {
         if (!IsInsideBoard(pos)) return false;
-    
-        var opponentBoard = (Board)_playerBoards[(Player)GetOpponent()];
-        var cell = (Cell)opponentBoard.GetCell(pos);
-        
-        // hanya boleh ditembak jika belum pernah ditembak (Hit atau Miss)
+        var board = (Board)_playerBoards[(Player)GetOpponent()];
+        var cell = board.GetCell(pos);
         return cell.State != CellState.Hit && cell.State != CellState.Miss;
     }
-    private void ApplyAttack(Player target, Position pos)
+
+    private void UpdateShipStatus(IShip s)
     {
-    } 
-    // updates ship status after hit
-    private void UpdateShipStatus(Ship s) 
-    {
-        if (s.Hits >= s.Size)
-            OnShipSunk?.Invoke(s);
+        if (s.Hits >= s.Size) OnShipSunk?.Invoke(s);
     }
-    // checks if there is a winner
+
     private bool CheckWinner()
     {
-        // Siapa lawan kita?
         var opponent = (Player)GetOpponent();
-        var opponentShips = _playerShips[opponent];
-
-        // Cek apakah ada kapal yang belum tenggelam
-        // Jika semua kapal (All) sudah tenggelam (Hits >= Size), maka menang
-        bool allShipsSunk = opponentShips.All(s => s.Hits >= s.Size);
-
-        if (allShipsSunk)
+        if (_playerShips[opponent].All(s => s.Hits >= s.Size))
         {
-            _winner = _currentPlayer; // Set pemenang
+            _winner = _currentPlayer;
             _status = GameStatus.End;
-            OnGameOver?.Invoke(_winner); // Trigger event
+            OnGameOver?.Invoke(_winner);
             return true;
         }
-
         return false;
     }
-    // switches turn to next player
+
     private void SwitchTurn()
-    {
-        // Ambil list player dari Dictionary
-        var players = _playerBoards.Keys.ToList();
+    {   
+        _currentPlayer = _playerBoards.Keys
+            .First(p => p != _currentPlayer);
 
-        // Kalau current adalah player pertama, ganti ke player kedua. 
-        // Kalau bukan, balik ke player pertama.
-        _currentPlayer = (_currentPlayer == players[0]) ? players[1] : players[0];
-
-        // Beritau sistem kalau giliran sudah ganti
         OnTurnChanged?.Invoke(_currentPlayer);
     }
-    
 }

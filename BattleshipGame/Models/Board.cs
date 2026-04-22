@@ -4,8 +4,8 @@ namespace Battleship.Models;
 
 public class Board : IBoard
 {
-    public int Size { get;}
-    public Cell [,] Cells { get; }
+    public int Size { get; set;}
+    public Cell [,] Cells { get; set; }
 
     public Board(int size)
     {
