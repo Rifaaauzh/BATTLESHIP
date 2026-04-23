@@ -36,46 +36,43 @@ public class GameController : IGameController
         };
     }
 
-    public void StartGame()
+    public bool StartGame()
     {
         if (_status != GameStatus.Setup) 
-            return;
+            return false;
 
         _status = GameStatus.InProgress;
         OnTurnChanged?.Invoke(_currentPlayer);
+        
+        return true;
     }
 
     public bool PlaceShip(IPlayer player, ShipType shipType, Position position, Orientation orientation)
     {
-        if (_status != GameStatus.Setup) return false;
+        if (_status != GameStatus.Setup)
+            return false;
 
         var p = (Player)player;
-        if (!ValidatePlacement(p, shipType, position, orientation)) return false;
-
-        var board = (Board)_playerBoards[p];
-
-
+        var board = _playerBoards[p];
         var ship = new Ship(shipType, position, orientation);
 
-        for (int i = 0; i < ship.Size ; i++)
-        {
-            int x = orientation == Orientation.Horizontal ? position.X + i : position.X;
-            int y = orientation == Orientation.Vertical ? position.Y + i : position.Y;
+        if (!ValidatePlacement(p, ship))
+            return false;
 
-            var cell = (Cell)board.GetCell(new Position(x, y));
-
-            cell.Ship = ship;
-            cell.State = CellState.Occupied;
-        }
-
+        PlaceShipOnBoard(board, ship);
         _playerShips[p].Add(ship);
+
         return true;
     }
+    
 
     public bool MakeMove(Position position)
     {
-        if (_status != GameStatus.InProgress) return false;
-        if (!ValidateAttack(position)) return false;
+        if (_status != GameStatus.InProgress) 
+            return false;
+        
+        if (!ValidateAttack(position)) 
+            return false;
 
         var opponent = (Player)GetOpponent();
         var board = (Board)_playerBoards[opponent];
@@ -89,7 +86,7 @@ public class GameController : IGameController
         {
             var ship = (Ship)cell.Ship!;
             ship.Hits++;
-            UpdateShipStatus(ship);
+            CheckShipSunk(ship);
         }
 
         OnMoveProcessed?.Invoke(cell);
@@ -99,75 +96,127 @@ public class GameController : IGameController
 
         return true;
     }
+    private Position GetShipPosition(Position start, Orientation orientation, int i)
+    {
+        int x = orientation == Orientation.Horizontal ? start.X + i : start.X;
+        int y = orientation == Orientation.Vertical ? start.Y + i : start.Y;
 
-    public void EndGame() => _status = GameStatus.End;
-    public GameStatus GetStatus() => _status;
-    public IPlayer? GetWinner() => _winner;
-    public IPlayer GetCurrentPlayer() => _currentPlayer;
+        return new Position(x, y);
+    }
+    private void PlaceShipOnBoard(Board board, Ship ship)
+    {
+        for (int i = 0; i < ship.Size; i++)
+        {
+            var pos = GetShipPosition(ship.Position, ship.Orientation, i);
+
+            var cell = (Cell)board.GetCell(pos);
+            cell.Ship = ship;
+            cell.State = CellState.Occupied;
+        }
+    }
+    public void EndGame()
+    {
+        if (_status == GameStatus.End)
+            return;
+
+        _status = GameStatus.End;
+
+        if (_winner != null)
+            OnGameOver?.Invoke(_winner);
+    }
+
+    public GameStatus GetStatus()
+    {
+        return _status;
+    }
+
+    public IPlayer? GetWinner()
+    {
+        return _winner;
+    }
+
+    public IPlayer GetCurrentPlayer()
+    {
+        return _currentPlayer;
+    }
+
     public IPlayer GetOpponent()
     {
-        return _playerBoards.Keys.First(p => p != _currentPlayer);
+        return _playerBoards.Keys.First(player => player != _currentPlayer);
     }
-    public IBoard GetBoard(IPlayer p) => _playerBoards[(Player)p];
-    public IReadOnlyList<IShip> GetShips(IPlayer p)
+
+    public IBoard GetBoard(IPlayer player)
     {
-        return _playerShips[(Player)p];
+        return _playerBoards[(Player)player];
     }
+    
 
-
+    public IReadOnlyList<IShip> GetShips(IPlayer player)
+    {
+        return _playerShips[(Player)player];
+    }
+    
     private bool IsInsideBoard(Position position)
     {
         int size = _playerBoards.Values.First().Size;
-        
-        return position.X >= 0 && position.X < size && position.Y >= 0 && position.Y < size;
+
+        return position.X >= 0 && position.X < size &&
+               position.Y >= 0 && position.Y < size;
     }
 
     private bool IsCellOccupied(Board board, Position position)
     {
-        return board.GetCell(position).State == CellState.Occupied;
+        return board.GetCell(position).Ship != null;
     }
 
-    private bool ValidatePlacement(Player player, ShipType shipType, Position position, Orientation orientation)
+    private bool ValidatePlacement(Player player, Ship ship)
     {
-        var board = (Board)_playerBoards[player];
+        var board = _playerBoards[player];
 
         for (int i = 0; i < ship.Size; i++)
         {
-            int x = orientation == Orientation.Horizontal ? position.X + i : position.X;
-            int y = orientation == Orientation.Vertical ? position.Y + i : position.Y;
-            var pos = new Position(x, y);
+            var pos = GetShipPosition(ship.Position, ship.Orientation, i);
 
-            if (!IsInsideBoard(pos) || IsCellOccupied(board, pos)) 
+            if (!IsInsideBoard(pos) || IsCellOccupied(board, pos))
                 return false;
         }
+
         return true;
     }
 
     private bool ValidateAttack(Position pos)
     {
-        if (!IsInsideBoard(pos)) return false;
-        var board = (Board)_playerBoards[(Player)GetOpponent()];
+        if (!IsInsideBoard(pos)) 
+            return false;
+        
+        var opponent = (Player)GetOpponent();
+        var board = (Board)_playerBoards[opponent];
+        
         var cell = board.GetCell(pos);
+        
         return cell.State != CellState.Hit && cell.State != CellState.Miss;
     }
 
-    private void UpdateShipStatus(IShip s)
+    private void CheckShipSunk (IShip s)
     {
-        if (s.Hits >= s.Size) OnShipSunk?.Invoke(s);
+        if (s.Hits >= s.Size) 
+            OnShipSunk?.Invoke(s);
     }
 
     private bool CheckWinner()
     {
         var opponent = (Player)GetOpponent();
-        if (_playerShips[opponent].All(s => s.Hits >= s.Size))
+
+        if (_playerShips[opponent].All(ship => ship.Hits >= ship.Size))
         {
             _winner = _currentPlayer;
-            _status = GameStatus.End;
-            OnGameOver?.Invoke(_winner);
+            EndGame();
             return true;
         }
+
         return false;
     }
+
 
     private void SwitchTurn()
     {   

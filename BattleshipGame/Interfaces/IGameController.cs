@@ -11,7 +11,7 @@ public interface IGameController
     event Action<IShip>? OnShipSunk;
     event Action<IPlayer>? OnGameOver;
 
-    void StartGame();
+    bool StartGame();
     bool PlaceShip(IPlayer player, ShipType shipType, Position position, Orientation orientation);
     bool MakeMove(Position position);
     void EndGame();

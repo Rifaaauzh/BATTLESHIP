@@ -10,7 +10,9 @@ class Program
 {
     static void Main()
     {
-        Console.WriteLine("=== BATTLESHIP GAME ===\n");
+        Console.WriteLine("====================================================\n");
+        Console.WriteLine("                 BATTLESHIP GAME                    \n");
+        Console.WriteLine("====================================================\n");
 
         Console.Write("Enter Player 1 name: ");
         var p1 = new Player(Console.ReadLine()!);
@@ -19,14 +21,15 @@ class Program
         var p2 = new Player(Console.ReadLine()!);
 
         var game = new GameController(p1, p2);
+        
+        // Event to show user whose turn it is
 
-// 🎮 EVENT: turn change
         game.OnTurnChanged += player =>
         {
             Console.WriteLine($"\n Turn: {player.Name}");
         };
 
-//  EVENT: move result
+        // Event to show move result of attack HIT (RED) and MISS (YELLOW) begitu
         game.OnMoveProcessed += cell =>
         {
             if (cell.State == CellState.Hit)
@@ -43,7 +46,7 @@ class Program
             Console.ResetColor();
         };
 
-//  EVENT: ship sunk
+        //  Event to show when the ship is sunk, and which type is it
         game.OnShipSunk += ship =>
         {
             Console.ForegroundColor = ConsoleColor.Magenta;
@@ -51,12 +54,12 @@ class Program
             Console.ResetColor();
         };
 
-//  EVENT: game over
+        //  Event to show when the game is over
         game.OnGameOver += player =>
         {
             Console.Clear();
             Console.WriteLine("================================");
-            Console.WriteLine("🏆 GAME OVER");
+            Console.WriteLine(" GAME OVER");
             Console.WriteLine($"Winner: {player.Name}");
             Console.WriteLine("================================");
         };
